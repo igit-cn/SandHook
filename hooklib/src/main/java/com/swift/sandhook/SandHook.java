@@ -229,9 +229,10 @@ public class SandHook {
     }
 
     public static Object getObject(long address) {
-        long threadSelf = getThreadId();
-        if (address == 0 || threadSelf == 0)
+        if (address == 0) {
             return null;
+        }
+        long threadSelf = getThreadId();
         return getObjectNative(threadSelf, address);
     }
 
