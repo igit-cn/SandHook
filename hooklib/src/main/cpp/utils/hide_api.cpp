@@ -13,7 +13,6 @@ extern int SDK_INT;
 extern "C" {
 
 
-    void* (*jitLoad)(bool*) = nullptr;
     void* jitCompilerHandle = nullptr;
     bool (*jitCompileMethod)(void*, void*, void*, bool) = nullptr;
     bool (*jitCompileMethodQ)(void*, void*, void*, bool, bool) = nullptr;
@@ -91,11 +90,17 @@ extern "C" {
                                                              bool)>(getSymCompat(jit_lib_path,
                                                                                  "jit_compile_method"));
             }
-            jitLoad = reinterpret_cast<void* (*)(bool*)>(getSymCompat(jit_lib_path, "jit_load"));
-            bool generate_debug_info = false;
-
-            if (jitLoad != nullptr) {
-                jitCompilerHandle = (jitLoad)(&generate_debug_info);
+            auto jit_load = getSymCompat(jit_lib_path, "jit_load");
+            if (jit_load) {
+                if (SDK_INT >= ANDROID_Q) {
+                    // Android 10：void* jit_load()
+                    // Android 11: JitCompilerInterface* jit_load()
+                    jitCompilerHandle = reinterpret_cast<void*(*)()>(jit_load)();
+                } else {
+                    // void* jit_load(bool* generate_debug_info)
+                    bool generate_debug_info = false;
+                    jitCompilerHandle = reinterpret_cast<void*(*)(void*)>(jit_load)(&generate_debug_info);
+                }
             } else {
                 jitCompilerHandle = getGlobalJitCompiler();
             }
@@ -348,14 +353,18 @@ extern "C" {
         return (reinterpret_cast<uintptr_t>(mid) % 2) != 0;
     }
 
-    ArtMethod* getArtMethod(jmethodID jmethodId) {
-        if (SDK_INT >= ANDROID_R && isIndexId(jmethodId)) {
-            if (origin_DecodeArtMethodId == nullptr) {
-                return reinterpret_cast<ArtMethod *>(jmethodId);
+    ArtMethod* getArtMethod(JNIEnv *env, jobject method) {
+        jmethodID methodId = env->FromReflectedMethod(method);
+        if (SDK_INT >= ANDROID_R && isIndexId(methodId)) {
+            if (origin_DecodeArtMethodId == nullptr || jniIdManager == nullptr) {
+                auto res = callStaticMethodAddr(env, "com/swift/sandhook/SandHook", "getArtMethod",
+                                                "(Ljava/lang/reflect/Member;)J", method);
+                return reinterpret_cast<ArtMethod *>(res);
+            } else {
+                return origin_DecodeArtMethodId(jniIdManager, methodId);
             }
-            return origin_DecodeArtMethodId(jniIdManager, jmethodId);
         } else {
-            return reinterpret_cast<ArtMethod *>(jmethodId);
+            return reinterpret_cast<ArtMethod *>(methodId);
         }
     }
 
